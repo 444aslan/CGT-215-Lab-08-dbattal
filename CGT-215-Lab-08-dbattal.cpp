@@ -8,24 +8,14 @@ using namespace std;
 using namespace sf;
 using namespace sfp;
 
-const float KB_SPEED = 0.2;
+// time between duck spawns
+const int DUCK_INTERVAL_MS = 1500;  
+// duck speed in ms
+const float DUCK_SPEED = 0.25;      
 
 void LoadTex(Texture& tex, string filename) {
     if (!tex.loadFromFile(filename)) {
         cout << "Could not load " << filename << endl;
-    }
-}
-
-void MoveCrossbow(PhysicsSprite& crossbow, int elapsedMS) {
-    if (Keyboard::isKeyPressed(Keyboard::Right)) {
-        Vector2f newPos(crossbow.getCenter());
-        newPos.x = newPos.x + (KB_SPEED * elapsedMS);
-        crossbow.setCenter(newPos);
-    }
-    if (Keyboard::isKeyPressed(Keyboard::Left)) {
-        Vector2f newPos(crossbow.getCenter());
-        newPos.x = newPos.x - (KB_SPEED * elapsedMS);
-        crossbow.setCenter(newPos);
     }
 }
 
@@ -36,14 +26,14 @@ Vector2f GetTextSize(Text text) {
 
 int main()
 {
-    RenderWindow window(VideoMode(800, 600), "Balloon Buster");
+    RenderWindow window(VideoMode(800, 600), "Duck Hunter");
     World world(Vector2f(0, 0));
     int score(0);
-    int arrows(1);
+    int arrows(5);
 
     SoundBuffer popBuffer;
     if (!popBuffer.loadFromFile("balloonpop.ogg")) {
-        cout << "coul not load balloonpop.ogg" << endl;
+        cout << "could not load balloonpop.ogg" << endl;
         exit(5);
     }
     Sound popSound;
@@ -56,13 +46,12 @@ int main()
     }
     music.play();
 
-    PhysicsSprite& crossBow = *new PhysicsSprite();
+    PhysicsSprite crossBow;
     Texture cbowTex;
     LoadTex(cbowTex, "images/crossbow.png");
     crossBow.setTexture(cbowTex);
     Vector2f sz = crossBow.getSize();
-    crossBow.setCenter(Vector2f(400,
-        600 - (sz.y / 2)));
+    crossBow.setCenter(Vector2f(400, 600 - (sz.y / 2)));
 
     PhysicsSprite arrow;
     Texture arrowTex;
@@ -76,48 +65,22 @@ int main()
     top.setStatic(true);
     world.AddPhysicsBody(top);
 
-    PhysicsRectangle left;
-    left.setSize(Vector2f(10, 600));
-    left.setCenter(Vector2f(5, 300));
-    left.setStatic(true);
-    world.AddPhysicsBody(left);
-
     PhysicsRectangle right;
     right.setSize(Vector2f(10, 600));
-    right.setCenter(Vector2f(795, 300));
+    right.setCenter(Vector2f(850, 300));
     right.setStatic(true);
     world.AddPhysicsBody(right);
-
-    Texture redTex;
-    LoadTex(redTex, "images/red_balloon.png");
-    PhysicsShapeList<PhysicsSprite> balloons;
-    for (int i(0); i < 6; i++) {
-        PhysicsSprite& balloon = balloons.Create();
-        balloon.setTexture(redTex);
-        int x = 50 + ((700 / 5) * i);
-        Vector2f sz = balloon.getSize();
-        balloon.setCenter(Vector2f(x, 20 + (sz.y / 2)));
-        balloon.setVelocity(Vector2f(0.25, 0));
-        world.AddPhysicsBody(balloon);
-        balloon.onCollision =
-            [&drawingArrow, &world, &arrow, &balloon, &balloons, &score, &popSound]
-            (PhysicsBodyCollisionResult result) {
-            if (result.object2 == arrow) {
-                popSound.play();
-                drawingArrow = false;
-                world.RemovePhysicsBody(arrow);
-                world.RemovePhysicsBody(balloon);
-                balloons.QueueRemove(balloon);
-                score += 10;
-            }
-            };
-    }
 
     top.onCollision = [&drawingArrow, &world, &arrow]
     (PhysicsBodyCollisionResult result) {
         drawingArrow = false;
         world.RemovePhysicsBody(arrow);
         };
+
+    Texture duckTex;
+    LoadTex(duckTex, "images/red_balloon.png");   
+    PhysicsShapeList<PhysicsSprite> ducks;
+    int duckTimer(0);  
 
     Font fnt;
     if (!fnt.loadFromFile("arial.ttf")) {
@@ -135,42 +98,70 @@ int main()
         if (deltaMS > 9) {
             lastTime = currentTime;
             world.UpdatePhysics(deltaMS);
-            MoveCrossbow(crossBow, deltaMS);
-            if (Keyboard::isKeyPressed(Keyboard::Space) &&
-                !drawingArrow) {
+
+            duckTimer -= deltaMS;
+            if (duckTimer <= 0) {
+                duckTimer = DUCK_INTERVAL_MS;
+                PhysicsSprite& duck = ducks.Create();
+                duck.setTexture(duckTex);
+                Vector2f dsz = duck.getSize();
+                duck.setCenter(Vector2f(-dsz.x / 2, 20 + (dsz.y / 2)));
+                duck.setVelocity(Vector2f(DUCK_SPEED, 0));
+                world.AddPhysicsBody(duck);
+                duck.onCollision =
+                    [&drawingArrow, &world, &arrow, &duck, &ducks, &score, &popSound, &right]
+                    (PhysicsBodyCollisionResult result) {
+                    if (result.object2 == arrow) {
+                        popSound.play();
+                        drawingArrow = false;
+                        world.RemovePhysicsBody(arrow);
+                        world.RemovePhysicsBody(duck);
+                        ducks.QueueRemove(duck);
+                        score += 10;
+                    }
+                    if (result.object2 == right) {
+                        world.RemovePhysicsBody(duck);
+                        ducks.QueueRemove(duck);
+                    }
+                    };
+            }
+
+            if (Keyboard::isKeyPressed(Keyboard::Space) && !drawingArrow && arrows > 0) {
                 drawingArrow = true;
                 arrows = arrows - 1;
                 arrow.setCenter(crossBow.getCenter());
                 arrow.setVelocity(Vector2f(0, -1));
                 world.AddPhysicsBody(arrow);
-
             }
 
             window.clear();
             if (drawingArrow) {
                 window.draw(arrow);
             }
-            balloons.DoRemovals();
-            for (PhysicsShape& balloon : balloons) {
-                window.draw((PhysicsSprite&)balloon);
+            ducks.DoRemovals();
+            for (PhysicsShape& duck : ducks) {
+                window.draw((PhysicsSprite&)duck);
             }
             window.draw(crossBow);
-            Text scoreText;
-            scoreText.setString(to_string(score));
-            scoreText.setFont(fnt);
-            window.draw(scoreText);
+
             Text arrowCountText;
-            arrowCountText.setString(to_string(arrows));
             arrowCountText.setFont(fnt);
-            arrowCountText.setPosition(Vector2f(790 - GetTextSize(arrowCountText).x, 0));
+            arrowCountText.setString(to_string(arrows));
+            arrowCountText.setPosition(Vector2f(10, 600 - GetTextSize(arrowCountText).y - 15));
             window.draw(arrowCountText);
-            //world.VisualizeAllBounds(window);
+
+            Text scoreText;
+            scoreText.setFont(fnt);
+            scoreText.setString(to_string(score));
+            scoreText.setPosition(Vector2f(790 - GetTextSize(scoreText).x,
+                600 - GetTextSize(scoreText).y - 15));
+            window.draw(scoreText);
 
             window.display();
-
         }
     }
-    window.display(); // this is needed to see the last frame
+
+    window.display(); 
     Text gameOverText;
     gameOverText.setString("GAME OVER");
     gameOverText.setFont(fnt);
@@ -178,17 +169,7 @@ int main()
     gameOverText.setPosition(400 - (sz.x / 2), 300 - (sz.y / 2));
     window.draw(gameOverText);
     window.display();
-    while (true);
 
+    while (Keyboard::isKeyPressed(Keyboard::Space));
+    while (!Keyboard::isKeyPressed(Keyboard::Space));
 }
-
-// Run program: Ctrl + F5 or Debug > Start Without Debugging menu
-// Debug program: F5 or Debug > Start Debugging menu
-
-// Tips for Getting Started: 
-//   1. Use the Solution Explorer window to add/manage files
-//   2. Use the Team Explorer window to connect to source control
-//   3. Use the Output window to see build output and other messages
-//   4. Use the Error List window to view errors
-//   5. Go to Project > Add New Item to create new code files, or Project > Add Existing Item to add existing code files to the project
-//   6. In the future, to open this project again, go to File > Open > Project and select the .sln file
